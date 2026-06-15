@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 
 void main() {
@@ -28,7 +29,8 @@ class HeartRateScreen extends StatefulWidget {
   State<HeartRateScreen> createState() => _HeartRateScreenState();
 }
 
-class _HeartRateScreenState extends State<HeartRateScreen> {
+class _HeartRateScreenState extends State<HeartRateScreen>
+    with WidgetsBindingObserver {
   final _health = Health();
 
   static const _types = [
@@ -43,14 +45,34 @@ class _HeartRateScreenState extends State<HeartRateScreen> {
     HealthDataAccess.READ,
   ];
 
+  static const _settingsChannel =
+      MethodChannel('com.xctraining/health_perms');
+
   String _status = 'Tap below to grant permissions';
   int? _heartRate;
   bool _loading = false;
+  bool _needsSettingsFallback = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _health.configure();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Re-check after user returns from Health Connect settings.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _needsSettingsFallback) {
+      _needsSettingsFallback = false;
+      _fetchData();
+    }
   }
 
   Future<void> _requestAndFetch() async {
@@ -70,41 +92,83 @@ class _HeartRateScreenState extends State<HeartRateScreen> {
     }
 
     setState(() => _status = 'Requesting permissions…');
-
-    final granted = await _health.requestAuthorization(_types, permissions: _permissions);
-    if (!granted) {
-      setState(() {
-        _status = 'Permissions denied';
-        _loading = false;
-      });
-      return;
-    }
-
-    setState(() => _status = 'Fetching heart rate…');
-
-    final now = DateTime.now();
-    final yesterday = now.subtract(const Duration(hours: 24));
-    final points = await _health.getHealthDataFromTypes(
-      startTime: yesterday,
-      endTime: now,
-      types: [HealthDataType.HEART_RATE],
+    final granted = await _health.requestAuthorization(
+      _types,
+      permissions: _permissions,
     );
 
-    if (points.isEmpty) {
+    if (!granted) {
+      // Launcher returned empty — open Health Connect settings as fallback.
       setState(() {
-        _status = 'No heart rate data in the last 24 hours';
+        _status = 'Open Health Connect to grant permissions, then come back.';
         _loading = false;
+        _needsSettingsFallback = true;
       });
+      try {
+        await _settingsChannel
+            .invokeMethod('openHealthConnectPermissions');
+      } on MissingPluginException {
+        setState(() => _status = 'Permissions denied');
+      }
       return;
     }
 
-    points.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
-    final latest = points.first.value as NumericHealthValue;
+    await _fetchData();
+  }
+
+  // To show only the *most recent* heart rate we must avoid pulling a huge
+  // span at once — 30 days of samples can be hundreds of thousands of points,
+  // which overruns the platform channel and ANRs the app. Instead we scan
+  // backward from now in small windows and stop at the first one with data.
+  static const _windowHours = 6;
+  static const _maxLookbackDays = 30;
+
+  Future<void> _fetchData() async {
     setState(() {
-      _heartRate = latest.numericValue.round();
-      _status = 'Most recent heart rate';
-      _loading = false;
+      _loading = true;
+      _status = 'Fetching heart rate…';
     });
+
+    try {
+      final now = DateTime.now();
+      final window = const Duration(hours: _windowHours);
+      final maxLookback = now.subtract(const Duration(days: _maxLookbackDays));
+
+      List<HealthDataPoint> points = const [];
+      var end = now;
+      while (end.isAfter(maxLookback)) {
+        var start = end.subtract(window);
+        if (start.isBefore(maxLookback)) start = maxLookback;
+        points = await _health.getHealthDataFromTypes(
+          startTime: start,
+          endTime: end,
+          types: [HealthDataType.HEART_RATE],
+        );
+        if (points.isNotEmpty) break;
+        end = start;
+      }
+
+      if (points.isEmpty) {
+        setState(() {
+          _status = 'No heart rate data in the last $_maxLookbackDays days';
+          _loading = false;
+        });
+        return;
+      }
+
+      points.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
+      final latest = points.first.value as NumericHealthValue;
+      setState(() {
+        _heartRate = latest.numericValue.round();
+        _status = 'Most recent heart rate';
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _status = 'Error reading heart rate: $e';
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -119,7 +183,11 @@ class _HeartRateScreenState extends State<HeartRateScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(_status, style: theme.textTheme.titleMedium),
+            Text(
+              _status,
+              style: theme.textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 32),
             if (_loading)
               const CircularProgressIndicator()
