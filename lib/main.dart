@@ -82,6 +82,7 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     });
 
     final available = await _health.isHealthConnectAvailable();
+    if (!mounted) return;
     if (!available) {
       setState(() {
         _status = 'Health Connect not available — redirecting to install…';
@@ -96,6 +97,7 @@ class _HeartRateScreenState extends State<HeartRateScreen>
       _types,
       permissions: _permissions,
     );
+    if (!mounted) return;
 
     if (!granted) {
       // Launcher returned empty — open Health Connect settings as fallback.
@@ -105,10 +107,17 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         _needsSettingsFallback = true;
       });
       try {
-        await _settingsChannel
-            .invokeMethod('openHealthConnectPermissions');
+        final opened = await _settingsChannel
+            .invokeMethod<bool>('openHealthConnectPermissions');
+        if (!mounted) return;
+        if (opened != true) {
+          setState(() => _status =
+              'Could not open Health Connect. Grant permissions in Settings.');
+        }
+      } on PlatformException {
+        if (mounted) setState(() => _status = 'Permissions denied');
       } on MissingPluginException {
-        setState(() => _status = 'Permissions denied');
+        if (mounted) setState(() => _status = 'Permissions denied');
       }
       return;
     }
@@ -147,6 +156,7 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         if (points.isNotEmpty) break;
         end = start;
       }
+      if (!mounted) return;
 
       if (points.isEmpty) {
         setState(() {
@@ -156,18 +166,23 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         return;
       }
 
-      points.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
-      final latest = points.first.value as NumericHealthValue;
+      // Single pass for the newest point — cheaper than sorting the window.
+      final latest = points.reduce(
+        (a, b) => a.dateFrom.isAfter(b.dateFrom) ? a : b,
+      );
+      final bpm = (latest.value as NumericHealthValue).numericValue.round();
       setState(() {
-        _heartRate = latest.numericValue.round();
+        _heartRate = bpm;
         _status = 'Most recent heart rate';
         _loading = false;
       });
     } catch (e) {
-      setState(() {
-        _status = 'Error reading heart rate: $e';
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _status = 'Error reading heart rate: $e';
+          _loading = false;
+        });
+      }
     }
   }
 
