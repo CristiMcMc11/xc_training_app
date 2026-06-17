@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 
+import 'health_sync_uploader.dart';
+
 void main() {
   runApp(const XcTrainingApp());
 }
@@ -32,14 +34,22 @@ class HeartRateScreen extends StatefulWidget {
 class _HeartRateScreenState extends State<HeartRateScreen>
     with WidgetsBindingObserver {
   final _health = Health();
+  late final _uploader = HealthSyncUploader(_health);
 
+  // DISTANCE and TOTAL_CALORIES are required to read WORKOUT: the health plugin
+  // enriches each exercise session with its distance/energy summary, which fails
+  // hard without those read permissions. They're also uploaded in their own right.
   static const _types = [
     HealthDataType.HEART_RATE,
     HealthDataType.STEPS,
     HealthDataType.WORKOUT,
+    HealthDataType.DISTANCE_DELTA,
+    HealthDataType.TOTAL_CALORIES_BURNED,
   ];
 
   static const _permissions = [
+    HealthDataAccess.READ,
+    HealthDataAccess.READ,
     HealthDataAccess.READ,
     HealthDataAccess.READ,
     HealthDataAccess.READ,
@@ -52,6 +62,9 @@ class _HeartRateScreenState extends State<HeartRateScreen>
   int? _heartRate;
   bool _loading = false;
   bool _needsSettingsFallback = false;
+
+  bool _uploading = false;
+  String? _uploadStatus;
 
   @override
   void initState() {
@@ -186,6 +199,36 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     }
   }
 
+  Future<void> _upload() async {
+    setState(() {
+      _uploading = true;
+      _uploadStatus = 'Starting upload…';
+    });
+    try {
+      final result = await _uploader.upload(
+        onProgress: (msg) {
+          if (mounted) setState(() => _uploadStatus = msg);
+        },
+      );
+      if (!mounted) return;
+      final c = result.counts;
+      setState(() {
+        _uploadStatus = 'Uploaded batch #${result.batchId} — '
+            '${c['heart_rate'] ?? 0} HR, ${c['steps'] ?? 0} steps, '
+            '${c['distance'] ?? 0} distance, ${c['total_calories'] ?? 0} cal, '
+            '${c['workouts'] ?? 0} workouts';
+        _uploading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _uploadStatus = 'Upload failed: $e';
+          _uploading = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -223,6 +266,29 @@ class _HeartRateScreenState extends State<HeartRateScreen>
               icon: const Icon(Icons.favorite),
               label: Text(_heartRate == null ? 'Grant Permissions & Fetch' : 'Refresh'),
             ),
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              onPressed: (_loading || _uploading) ? null : _upload,
+              icon: _uploading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.cloud_upload),
+              label: const Text('Upload to Server'),
+            ),
+            if (_uploadStatus != null) ...[
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  _uploadStatus!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
           ],
         ),
       ),

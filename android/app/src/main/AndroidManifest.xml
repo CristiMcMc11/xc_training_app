@@ -3,6 +3,10 @@
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <!-- READ_DISTANCE and READ_TOTAL_CALORIES_BURNED are needed to read workouts
+         (the plugin reads each session's distance/energy summary) and are uploaded too. -->
+    <uses-permission android:name="android.permission.health.READ_DISTANCE" />
+    <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
 
     <application
         android:label="xc_training_app"
