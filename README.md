@@ -9,10 +9,10 @@ HealthKit (iOS) support is planned.
 
 ## Features
 
-- Requests Health Connect read access for heart rate, steps, workouts, distance,
-  and active calories.
+- Requests Health Connect read access for heart rate, HRV, resting HR,
+  respiratory rate, steps, distance, active calories, sleep, and workouts.
 - Shows the most recent heart rate as a single number.
-- Uploads a 30-day window of health data to the server as a single gzipped
+- Uploads a 30-day window of all of the above to the server as a single gzipped
   `health_sync` payload, then reports the server's batch id and per-metric counts.
 - Handles the awkward parts of platform-integrated Health Connect (Android 14+):
   the permission-rationale activity-alias, the `FlutterFragmentActivity`
@@ -119,7 +119,6 @@ A few Android 14+ specifics that are easy to miss (full detail in
 
 ## Roadmap
 
-- Upload the remaining schema metrics: HRV, resting HR, respiratory rate, sleep.
 - iOS HealthKit support.
 - Background sync.
 - Real auth (a login endpoint) instead of re-registering when a token is lost.

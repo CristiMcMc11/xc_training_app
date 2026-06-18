@@ -18,10 +18,12 @@ Read health data (heart rate, steps, workouts) from Health Connect on Android an
 
 Single-screen app (`lib/main.dart`) that:
 1. Checks if Health Connect is installed, offers to install it if not
-2. Requests READ permissions for heart rate, steps, workouts, distance, calories
+2. Requests READ permissions for heart rate, steps, workouts, distance, calories,
+   HRV, resting HR, respiratory rate, and sleep
 3. Displays the most recent heart rate reading as a single number in bpm
-4. **Uploads** heart rate, steps, distance, calories, and workouts to the server
-   (see `lib/health_sync_uploader.dart` and `docs/SERVER_SCHEMA.md`)
+4. **Uploads the full schema** to the server — heart rate, HRV, resting HR,
+   respiratory rate, steps, distance, calories, sleep (sessions + stages), and
+   workouts (see `lib/health_sync_uploader.dart` and `docs/SERVER_SCHEMA.md`)
 
 ## Server upload (`lib/health_sync_uploader.dart`)
 
@@ -73,8 +75,6 @@ await health.getHealthDataFromTypes(startTime: ..., endTime: ..., types: [...]);
 
 ## Planned next steps
 
-- Upload remaining schema metrics: HRV, resting HR, respiratory rate, and sleep
-  (sleep needs session+stage modeling — see SERVER_SCHEMA.md shapes C/D)
 - iOS HealthKit support
 - Background sync
 - Real auth (login endpoint) instead of re-register on token loss

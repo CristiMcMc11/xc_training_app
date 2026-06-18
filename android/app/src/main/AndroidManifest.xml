@@ -7,6 +7,11 @@
          (the plugin reads each session's distance/energy summary) and are uploaded too. -->
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
+    <!-- Recovery & sleep metrics. READ_SLEEP covers sessions and all stages. -->
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_RESPIRATORY_RATE" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
 
     <application
         android:label="xc_training_app"

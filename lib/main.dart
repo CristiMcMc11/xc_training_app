@@ -36,23 +36,23 @@ class _HeartRateScreenState extends State<HeartRateScreen>
   final _health = Health();
   late final _uploader = HealthSyncUploader(_health);
 
-  // DISTANCE and TOTAL_CALORIES are required to read WORKOUT: the health plugin
-  // enriches each exercise session with its distance/energy summary, which fails
-  // hard without those read permissions. They're also uploaded in their own right.
+  // Every metric the app reads/uploads. All READ-only, so requestAuthorization
+  // defaults (no explicit permissions list needed).
+  //
+  // DISTANCE and TOTAL_CALORIES are also required to read WORKOUT: the health
+  // plugin enriches each exercise session with its distance/energy summary, which
+  // fails hard without those read permissions. SLEEP_SESSION's READ_SLEEP grant
+  // also covers the individual sleep stages.
   static const _types = [
     HealthDataType.HEART_RATE,
     HealthDataType.STEPS,
     HealthDataType.WORKOUT,
     HealthDataType.DISTANCE_DELTA,
     HealthDataType.TOTAL_CALORIES_BURNED,
-  ];
-
-  static const _permissions = [
-    HealthDataAccess.READ,
-    HealthDataAccess.READ,
-    HealthDataAccess.READ,
-    HealthDataAccess.READ,
-    HealthDataAccess.READ,
+    HealthDataType.HEART_RATE_VARIABILITY_RMSSD,
+    HealthDataType.RESTING_HEART_RATE,
+    HealthDataType.RESPIRATORY_RATE,
+    HealthDataType.SLEEP_SESSION,
   ];
 
   static const _settingsChannel =
@@ -106,10 +106,7 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     }
 
     setState(() => _status = 'Requesting permissions…');
-    final granted = await _health.requestAuthorization(
-      _types,
-      permissions: _permissions,
-    );
+    final granted = await _health.requestAuthorization(_types);
     if (!mounted) return;
 
     if (!granted) {
@@ -211,12 +208,16 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         },
       );
       if (!mounted) return;
-      final c = result.counts;
+      // Summarize every non-zero metric the server counted (drops warnings).
+      final counts = Map<String, dynamic>.from(result.counts)
+        ..remove('warnings');
+      final summary = counts.entries
+          .where((e) => e.value is num && (e.value as num) > 0)
+          .map((e) => '${e.value} ${e.key}')
+          .join(', ');
       setState(() {
         _uploadStatus = 'Uploaded batch #${result.batchId} — '
-            '${c['heart_rate'] ?? 0} HR, ${c['steps'] ?? 0} steps, '
-            '${c['distance'] ?? 0} distance, ${c['total_calories'] ?? 0} cal, '
-            '${c['workouts'] ?? 0} workouts';
+            '${summary.isEmpty ? 'no records' : summary}';
         _uploading = false;
       });
     } catch (e) {

@@ -62,6 +62,8 @@ class HealthSyncUploader {
     final now = DateTime.now();
     final windowStart = now.subtract(const Duration(days: _windowDays));
 
+    // High/medium volume: chunked so a single platform-channel call can't carry
+    // an unbounded sample count.
     final heartRate =
         await _readChunked(HealthDataType.HEART_RATE, windowStart, now, _hrChunk);
     final steps =
@@ -73,6 +75,25 @@ class HealthSyncUploader {
     final workouts =
         await _readChunked(HealthDataType.WORKOUT, windowStart, now, _spanChunk);
 
+    // Low volume: a single read over the whole window. Sleep stages come from the
+    // parent session record, so each stage carries its session's uuid.
+    final hrv = await _readWindow(
+        HealthDataType.HEART_RATE_VARIABILITY_RMSSD, windowStart, now);
+    final restingHr =
+        await _readWindow(HealthDataType.RESTING_HEART_RATE, windowStart, now);
+    final respiratory =
+        await _readWindow(HealthDataType.RESPIRATORY_RATE, windowStart, now);
+    final sleepSessions =
+        await _readWindow(HealthDataType.SLEEP_SESSION, windowStart, now);
+    final sleepDeep =
+        await _readWindow(HealthDataType.SLEEP_DEEP, windowStart, now);
+    final sleepRem =
+        await _readWindow(HealthDataType.SLEEP_REM, windowStart, now);
+    final sleepLight =
+        await _readWindow(HealthDataType.SLEEP_LIGHT, windowStart, now);
+    final sleepAwake =
+        await _readWindow(HealthDataType.SLEEP_AWAKE, windowStart, now);
+
     final payload = _buildPayload(
       athleteId: 0, // filled in after auth, below
       windowStart: windowStart,
@@ -82,12 +103,28 @@ class HealthSyncUploader {
       distance: distance,
       calories: calories,
       workouts: workouts,
+      hrv: hrv,
+      restingHr: restingHr,
+      respiratory: respiratory,
+      sleepSessions: sleepSessions,
+      sleepDeep: sleepDeep,
+      sleepRem: sleepRem,
+      sleepLight: sleepLight,
+      sleepAwake: sleepAwake,
     );
     final recordCount = heartRate.length +
         steps.length +
         distance.length +
         calories.length +
-        workouts.length;
+        workouts.length +
+        hrv.length +
+        restingHr.length +
+        respiratory.length +
+        sleepSessions.length +
+        sleepDeep.length +
+        sleepRem.length +
+        sleepLight.length +
+        sleepAwake.length;
 
     onProgress('Authenticating…');
     var auth = await _loadAuth();
@@ -160,6 +197,21 @@ class HealthSyncUploader {
     return _health.removeDuplicates(out);
   }
 
+  /// Single read over the whole window — for low-volume metrics (HRV, resting HR,
+  /// respiratory rate, sleep) where chunking would only add round-trips.
+  Future<List<HealthDataPoint>> _readWindow(
+    HealthDataType type,
+    DateTime start,
+    DateTime end,
+  ) async {
+    final pts = await _health.getHealthDataFromTypes(
+      startTime: start,
+      endTime: end,
+      types: [type],
+    );
+    return _health.removeDuplicates(pts);
+  }
+
   Map<String, dynamic> _buildPayload({
     required int athleteId,
     required DateTime windowStart,
@@ -169,9 +221,29 @@ class HealthSyncUploader {
     required List<HealthDataPoint> distance,
     required List<HealthDataPoint> calories,
     required List<HealthDataPoint> workouts,
+    required List<HealthDataPoint> hrv,
+    required List<HealthDataPoint> restingHr,
+    required List<HealthDataPoint> respiratory,
+    required List<HealthDataPoint> sleepSessions,
+    required List<HealthDataPoint> sleepDeep,
+    required List<HealthDataPoint> sleepRem,
+    required List<HealthDataPoint> sleepLight,
+    required List<HealthDataPoint> sleepAwake,
   }) {
     String iso(DateTime t) => t.toUtc().toIso8601String();
     num value(HealthDataPoint p) => (p.value as NumericHealthValue).numericValue;
+
+    // Shape A: instantaneous point { time, value, recording_method }.
+    List<Map<String, dynamic>> points(List<HealthDataPoint> pts,
+            {required bool asInt}) =>
+        [
+          for (final p in pts)
+            {
+              'time': iso(p.dateFrom),
+              'value': asInt ? value(p).round() : value(p),
+              'recording_method': p.recordingMethod.name,
+            },
+        ];
 
     // Shape B: interval sample with a measured value. [asInt] for counts (steps),
     // false for continuous quantities (meters, kilocalories).
@@ -187,6 +259,19 @@ class HealthSyncUploader {
             },
         ];
 
+    // Shapes C/D: sleep session / stage { uuid, start, end, recording_method }.
+    // The stage's uuid is its parent session's id, which is the link the schema
+    // uses to group stages under a session.
+    List<Map<String, dynamic>> sleepSpans(List<HealthDataPoint> pts) => [
+          for (final p in pts)
+            {
+              'uuid': p.uuid,
+              'start': iso(p.dateFrom),
+              'end': iso(p.dateTo),
+              'recording_method': p.recordingMethod.name,
+            },
+        ];
+
     return {
       'type': 'health_sync',
       'athlete_id': athleteId,
@@ -196,17 +281,18 @@ class HealthSyncUploader {
       'uploaded_at': iso(DateTime.now()),
       'window_start': iso(windowStart),
       'window_end': iso(windowEnd),
-      'heart_rate_samples': [
-        for (final p in heartRate)
-          {
-            'time': iso(p.dateFrom),
-            'value': value(p).round(),
-            'recording_method': p.recordingMethod.name,
-          },
-      ],
+      'heart_rate_samples': points(heartRate, asInt: true),
+      'hrv_rmssd_samples': points(hrv, asInt: false),
+      'resting_heart_rate_samples': points(restingHr, asInt: true),
+      'respiratory_rate_samples': points(respiratory, asInt: false),
       'step_samples': spans(steps, asInt: true),
       'distance_samples': spans(distance, asInt: false),
       'total_calorie_samples': spans(calories, asInt: false),
+      'sleep_sessions': sleepSpans(sleepSessions),
+      'sleep_deep_samples': sleepSpans(sleepDeep),
+      'sleep_rem_samples': sleepSpans(sleepRem),
+      'sleep_light_samples': sleepSpans(sleepLight),
+      'sleep_awake_samples': sleepSpans(sleepAwake),
       'workouts': [
         for (final p in workouts)
           {
