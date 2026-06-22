@@ -137,6 +137,34 @@ semantically a child.
 { "start_time": "2026-06-06T15:53:49.000Z", "end_time": "2026-06-06T16:02:36.000Z", "activity_type": "RUNNING", "recording_method": "unknown" }
 ```
 
+### Shape F — Recorded workout with GPS route: `{ start_time, end_time, source, route[] }`
+
+| Array | Notes |
+|---|---|
+| `recorded_workouts` | Workouts recorded **in-app from the phone's GPS** (start/stop buttons), as opposed to `workouts`, which come from Health Connect. Each carries a `route` — an ordered list of GPS samples. `source` is `"app_gps"`. |
+
+Each `route` element is a GPS fix: `latitude`/`longitude` (degrees, WGS-84) and
+`time` are always present; `altitude` (metres), `accuracy` (metres), and `speed`
+(m/s) are included when the device reports them.
+
+```json
+{
+  "start_time": "2026-06-17T12:00:00.000Z",
+  "end_time": "2026-06-17T12:25:30.000Z",
+  "source": "app_gps",
+  "route": [
+    { "time": "2026-06-17T12:00:01.000Z", "latitude": 40.0150, "longitude": -105.2705, "altitude": 1655.0, "accuracy": 4.9, "speed": 2.7 },
+    { "time": "2026-06-17T12:00:06.000Z", "latitude": 40.0151, "longitude": -105.2707, "altitude": 1655.2, "accuracy": 4.6, "speed": 2.8 }
+  ]
+}
+```
+
+Storage suggestion: a `recorded_workout` row (athlete_id, start_ts, end_ts,
+source, batch_id) plus a `route_point` time-series child (athlete_id,
+recorded_workout_id, ts, lat, lon, altitude, accuracy, speed). Natural dedup key
+for the parent: `(athlete_id, start_ts, end_ts, source)`. Route volume is bounded
+(one fix every few metres), so it's far lighter than heart rate.
+
 ---
 
 ## 5. Full array reference (quick index)
@@ -156,6 +184,7 @@ semantically a child.
 | `sleep_rem_samples` | D | `start`,`end` | — | — | `uuid` → session |
 | `sleep_deep_samples` | D | `start`,`end` | — | — | `uuid` → session |
 | `workouts` | E | `start_time`,`end_time` | — | — | — |
+| `recorded_workouts` | F | `start_time`,`end_time` | — | — | nested `route[]` (lat/lon/time) |
 
 ---
 

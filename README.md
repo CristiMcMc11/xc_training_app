@@ -12,6 +12,8 @@ HealthKit (iOS) support is planned.
 - Requests Health Connect read access for heart rate, HRV, resting HR,
   respiratory rate, steps, distance, active calories, sleep, and workouts.
 - Shows the most recent heart rate as a single number.
+- **Record a workout's GPS route** — Start/Stop buttons track location while
+  active; the route uploads alongside the health data.
 - Optional **Sign in with Google** — uploads are then authenticated as that
   Google account and carry the Google profile.
 - Uploads a 30-day window of all of the above to the server as a single gzipped

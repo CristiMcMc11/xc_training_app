@@ -4,6 +4,7 @@ import 'package:health/health.dart';
 
 import 'google_auth.dart';
 import 'health_sync_uploader.dart';
+import 'workout_recorder.dart';
 
 void main() {
   runApp(const XcTrainingApp());
@@ -37,6 +38,7 @@ class _HeartRateScreenState extends State<HeartRateScreen>
   final _health = Health();
   late final _uploader = HealthSyncUploader(_health);
   final _googleAuth = GoogleAuthService();
+  final _recorder = WorkoutRecorder();
 
   // Every metric the app reads/uploads. All READ-only, so requestAuthorization
   // defaults (no explicit permissions list needed).
@@ -76,12 +78,21 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _health.configure();
+    // Rebuild as the route grows / recording state changes.
+    _recorder.addListener(_onRecorderChanged);
+    _recorder.load();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _recorder.removeListener(_onRecorderChanged);
+    _recorder.dispose();
     super.dispose();
+  }
+
+  void _onRecorderChanged() {
+    if (mounted) setState(() {});
   }
 
   // Re-check after user returns from Health Connect settings.
@@ -218,18 +229,40 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     if (mounted) setState(() => _googleUser = null);
   }
 
+  Future<void> _toggleRecording() async {
+    try {
+      if (_recorder.isRecording) {
+        final workout = await _recorder.stop();
+        if (mounted) {
+          setState(() => _uploadStatus = workout == null
+              ? 'Workout stopped — no location points captured.'
+              : 'Workout recorded: ${workout.route.length} points. '
+                  'Upload to send it.');
+        }
+      } else {
+        await _recorder.start();
+      }
+    } catch (e) {
+      if (mounted) setState(() => _uploadStatus = 'Recording error: $e');
+    }
+  }
+
   Future<void> _upload() async {
     setState(() {
       _uploading = true;
       _uploadStatus = 'Starting upload…';
     });
+    // Snapshot the routes being sent so we only clear those on success.
+    final sentRoutes = _recorder.pending.toList();
     try {
       final result = await _uploader.upload(
         googleUser: _googleUser,
+        recordedWorkouts: sentRoutes,
         onProgress: (msg) {
           if (mounted) setState(() => _uploadStatus = msg);
         },
       );
+      await _recorder.markUploaded(sentRoutes);
       if (!mounted) return;
       // Summarize every non-zero metric the server counted (drops warnings).
       final counts = Map<String, dynamic>.from(result.counts)
@@ -238,9 +271,12 @@ class _HeartRateScreenState extends State<HeartRateScreen>
           .where((e) => e.value is num && (e.value as num) > 0)
           .map((e) => '${e.value} ${e.key}')
           .join(', ');
+      final routeNote = sentRoutes.isEmpty
+          ? ''
+          : ', ${sentRoutes.length} recorded route(s)';
       setState(() {
         _uploadStatus = 'Uploaded batch #${result.batchId} — '
-            '${summary.isEmpty ? 'no records' : summary}';
+            '${summary.isEmpty ? 'no records' : summary}$routeNote';
         _uploading = false;
       });
     } catch (e) {
@@ -251,6 +287,35 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         });
       }
     }
+  }
+
+  Widget _buildWorkoutRecorder(ThemeData theme) {
+    final recording = _recorder.isRecording;
+    final pending = _recorder.pending.length;
+    return Column(
+      children: [
+        FilledButton.icon(
+          onPressed: _toggleRecording,
+          style: recording
+              ? FilledButton.styleFrom(backgroundColor: theme.colorScheme.error)
+              : null,
+          icon: Icon(recording ? Icons.stop : Icons.fiber_manual_record),
+          label: Text(recording ? 'Stop Workout' : 'Start Workout'),
+        ),
+        if (recording)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('Recording… ${_recorder.currentPointCount} points',
+                style: theme.textTheme.bodySmall),
+          )
+        else if (pending > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('$pending recorded route(s) pending upload',
+                style: theme.textTheme.bodySmall),
+          ),
+      ],
+    );
   }
 
   Widget _buildGoogleAuth(ThemeData theme) {
@@ -287,7 +352,8 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         title: const Text('XC Training'),
         backgroundColor: theme.colorScheme.inversePrimary,
       ),
-      body: Center(
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -316,6 +382,8 @@ class _HeartRateScreenState extends State<HeartRateScreen>
               icon: const Icon(Icons.favorite),
               label: Text(_heartRate == null ? 'Grant Permissions & Fetch' : 'Refresh'),
             ),
+            const SizedBox(height: 16),
+            _buildWorkoutRecorder(theme),
             const SizedBox(height: 16),
             _buildGoogleAuth(theme),
             const SizedBox(height: 16),

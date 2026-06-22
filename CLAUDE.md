@@ -24,6 +24,18 @@ Single-screen app (`lib/main.dart`) that:
 4. **Uploads the full schema** to the server — heart rate, HRV, resting HR,
    respiratory rate, steps, distance, calories, sleep (sessions + stages), and
    workouts (see `lib/health_sync_uploader.dart` and `docs/SERVER_SCHEMA.md`)
+5. **Records a workout's GPS route** (Start/Stop buttons) and uploads it as
+   `recorded_workouts` (see `lib/workout_recorder.dart`)
+
+## Workout GPS recording (`lib/workout_recorder.dart`)
+
+- Uses `geolocator`; streams positions (best accuracy, 5 m distance filter) while
+  recording, foreground only. Manifest declares `ACCESS_FINE/COARSE_LOCATION`.
+- `WorkoutRecorder` is a `ChangeNotifier`; finished routes persist in
+  shared_preferences (`recorded_workouts` key) until uploaded, then cleared.
+- On upload, pending routes go in the payload under `recorded_workouts` (one
+  object per route: `start_time`, `end_time`, `source:"app_gps"`, and a `route`
+  array of `{time,latitude,longitude,altitude?,accuracy?,speed?}`).
 
 ## Server upload (`lib/health_sync_uploader.dart`)
 

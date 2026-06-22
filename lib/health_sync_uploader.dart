@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'google_auth.dart';
+import 'workout_recorder.dart';
 
 /// Outcome of a successful upload: the server's batch id and per-metric counts.
 class HealthSyncResult {
@@ -63,6 +64,7 @@ class HealthSyncUploader {
   Future<HealthSyncResult> upload({
     required void Function(String) onProgress,
     GoogleUser? googleUser,
+    List<RecordedWorkout> recordedWorkouts = const [],
   }) async {
     onProgress('Reading health data…');
     final now = DateTime.now();
@@ -118,6 +120,7 @@ class HealthSyncUploader {
       sleepLight: sleepLight,
       sleepAwake: sleepAwake,
       googleUser: googleUser,
+      recordedWorkouts: recordedWorkouts,
     );
     final recordCount = heartRate.length +
         steps.length +
@@ -131,7 +134,8 @@ class HealthSyncUploader {
         sleepDeep.length +
         sleepRem.length +
         sleepLight.length +
-        sleepAwake.length;
+        sleepAwake.length +
+        recordedWorkouts.fold<int>(0, (sum, w) => sum + w.route.length);
 
     onProgress(googleUser == null
         ? 'Authenticating…'
@@ -242,6 +246,7 @@ class HealthSyncUploader {
     required List<HealthDataPoint> sleepLight,
     required List<HealthDataPoint> sleepAwake,
     GoogleUser? googleUser,
+    List<RecordedWorkout> recordedWorkouts = const [],
   }) {
     String iso(DateTime t) => t.toUtc().toIso8601String();
     num value(HealthDataPoint p) => (p.value as NumericHealthValue).numericValue;
@@ -322,6 +327,9 @@ class HealthSyncUploader {
             'recording_method': p.recordingMethod.name,
           },
       ],
+      // App-recorded GPS routes (see docs/SERVER_SCHEMA.md, "recorded_workouts").
+      if (recordedWorkouts.isNotEmpty)
+        'recorded_workouts': [for (final w in recordedWorkouts) w.toJson()],
     };
   }
 
