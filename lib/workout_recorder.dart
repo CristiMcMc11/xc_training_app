@@ -85,6 +85,9 @@ class WorkoutRecorder extends ChangeNotifier {
   final List<RoutePoint> _current = [];
   int get currentPointCount => _current.length;
 
+  /// The route being recorded right now (empty when not recording).
+  List<RoutePoint> get currentRoute => List.unmodifiable(_current);
+
   StreamSubscription<Position>? _sub;
 
   final List<RecordedWorkout> _pending = [];

@@ -10,13 +10,18 @@ Read health data (heart rate, steps, workouts) from Health Connect on Android an
 
 - Flutter 3.44.2, Dart 3.12.2
 - `health: ^13.3.1` — wraps Health Connect (Android) and HealthKit (iOS)
-- `http` — server upload; `shared_preferences` — persists the auth token
+- `http` — server upload; `shared_preferences` — token + pending routes
+- `geolocator` — workout GPS; `flutter_map` + `latlong2` — route map (OSM, no key)
+- `google_sign_in` — optional Google auth
 - Android minimum SDK: 26 (Health Connect requirement)
 - Package ID: `com.xctraining.xc_training_app`
 
 ## Current state
 
-Single-screen app (`lib/main.dart`) that:
+Two-tab app (`lib/main.dart`, `NavigationBar` + `IndexedStack` so both tabs and
+the live recording/map stay alive across switches):
+
+**Health tab**
 1. Checks if Health Connect is installed, offers to install it if not
 2. Requests READ permissions for heart rate, steps, workouts, distance, calories,
    HRV, resting HR, respiratory rate, and sleep
@@ -24,8 +29,9 @@ Single-screen app (`lib/main.dart`) that:
 4. **Uploads the full schema** to the server — heart rate, HRV, resting HR,
    respiratory rate, steps, distance, calories, sleep (sessions + stages), and
    workouts (see `lib/health_sync_uploader.dart` and `docs/SERVER_SCHEMA.md`)
-5. **Records a workout's GPS route** (Start/Stop buttons) and uploads it as
-   `recorded_workouts` (see `lib/workout_recorder.dart`)
+**Workout tab**
+5. **Records a workout's GPS route** (Start/Stop) and draws it live on a map;
+   uploads it (from the Health tab) as `recorded_workouts`.
 
 ## Workout GPS recording (`lib/workout_recorder.dart`)
 
@@ -36,6 +42,9 @@ Single-screen app (`lib/main.dart`) that:
 - On upload, pending routes go in the payload under `recorded_workouts` (one
   object per route: `start_time`, `end_time`, `source:"app_gps"`, and a `route`
   array of `{time,latitude,longitude,altitude?,accuracy?,speed?}`).
+- The Workout tab map is `flutter_map` with OpenStreetMap tiles (no API key). It
+  draws the live/most-recent route as a polyline with start/end markers and a
+  `MapController` follows the latest fix while recording.
 
 ## Server upload (`lib/health_sync_uploader.dart`)
 

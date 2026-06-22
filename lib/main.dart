@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:health/health.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'google_auth.dart';
 import 'health_sync_uploader.dart';
@@ -73,6 +75,10 @@ class _HeartRateScreenState extends State<HeartRateScreen>
   GoogleUser? _googleUser;
   bool _signingIn = false;
 
+  int _tabIndex = 0;
+  final _mapController = MapController();
+  String? _recordStatus;
+
   @override
   void initState() {
     super.initState();
@@ -88,11 +94,24 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     WidgetsBinding.instance.removeObserver(this);
     _recorder.removeListener(_onRecorderChanged);
     _recorder.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
   void _onRecorderChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    // Follow the latest fix while recording.
+    if (_recorder.isRecording && _recorder.currentRoute.isNotEmpty) {
+      final last = _recorder.currentRoute.last;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          _mapController.move(LatLng(last.latitude, last.longitude), 16);
+        } catch (_) {
+          // Map not laid out yet (e.g. on the other tab) — ignore.
+        }
+      });
+    }
   }
 
   // Re-check after user returns from Health Connect settings.
@@ -234,16 +253,17 @@ class _HeartRateScreenState extends State<HeartRateScreen>
       if (_recorder.isRecording) {
         final workout = await _recorder.stop();
         if (mounted) {
-          setState(() => _uploadStatus = workout == null
+          setState(() => _recordStatus = workout == null
               ? 'Workout stopped — no location points captured.'
               : 'Workout recorded: ${workout.route.length} points. '
-                  'Upload to send it.');
+                  'Upload from the Health tab to send it.');
         }
       } else {
+        if (mounted) setState(() => _recordStatus = null);
         await _recorder.start();
       }
     } catch (e) {
-      if (mounted) setState(() => _uploadStatus = 'Recording error: $e');
+      if (mounted) setState(() => _recordStatus = 'Recording error: $e');
     }
   }
 
@@ -352,68 +372,201 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         title: const Text('XC Training'),
         backgroundColor: theme.colorScheme.inversePrimary,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+      // IndexedStack keeps both tabs (and the recording/map) alive across switches.
+      body: IndexedStack(
+        index: _tabIndex,
+        children: [
+          _buildHealthTab(theme),
+          _buildWorkoutTab(theme),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tabIndex,
+        onDestinationSelected: (i) => setState(() => _tabIndex = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.favorite), label: 'Health'),
+          NavigationDestination(
+              icon: Icon(Icons.directions_run), label: 'Workout'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHealthTab(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            _status,
+            style: theme.textTheme.titleMedium,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 32),
+          if (_loading)
+            const CircularProgressIndicator()
+          else if (_heartRate != null) ...[
             Text(
-              _status,
-              style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 32),
-            if (_loading)
-              const CircularProgressIndicator()
-            else if (_heartRate != null) ...[
-              Text(
-                '$_heartRate',
-                style: theme.textTheme.displayLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
-                ),
+              '$_heartRate',
+              style: theme.textTheme.displayLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.primary,
               ),
-              const SizedBox(height: 8),
-              Text('bpm', style: theme.textTheme.titleLarge),
-            ],
-            const SizedBox(height: 48),
-            ElevatedButton.icon(
-              onPressed: _loading ? null : _requestAndFetch,
-              icon: const Icon(Icons.favorite),
-              label: Text(_heartRate == null ? 'Grant Permissions & Fetch' : 'Refresh'),
             ),
+            const SizedBox(height: 8),
+            Text('bpm', style: theme.textTheme.titleLarge),
+          ],
+          const SizedBox(height: 48),
+          ElevatedButton.icon(
+            onPressed: _loading ? null : _requestAndFetch,
+            icon: const Icon(Icons.favorite),
+            label: Text(
+                _heartRate == null ? 'Grant Permissions & Fetch' : 'Refresh'),
+          ),
+          const SizedBox(height: 16),
+          _buildGoogleAuth(theme),
+          const SizedBox(height: 16),
+          FilledButton.tonalIcon(
+            onPressed: (_loading || _uploading) ? null : _upload,
+            icon: _uploading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.cloud_upload),
+            label: Text(_googleUser == null
+                ? 'Upload to Server'
+                : 'Upload as ${_googleUser!.email}'),
+          ),
+          if (_uploadStatus != null) ...[
             const SizedBox(height: 16),
-            _buildWorkoutRecorder(theme),
-            const SizedBox(height: 16),
-            _buildGoogleAuth(theme),
-            const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-              onPressed: (_loading || _uploading) ? null : _upload,
-              icon: _uploading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.cloud_upload),
-              label: Text(_googleUser == null
-                  ? 'Upload to Server'
-                  : 'Upload as ${_googleUser!.email}'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                _uploadStatus!,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall,
+              ),
             ),
-            if (_uploadStatus != null) ...[
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  _uploadStatus!,
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkoutTab(ThemeData theme) {
+    return Column(
+      children: [
+        Expanded(child: _buildMap(theme)),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildWorkoutRecorder(theme),
+              if (_recordStatus != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _recordStatus!,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodySmall,
                 ),
-              ),
+              ],
             ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The route to draw: the live one while recording, else the most recent
+  /// not-yet-uploaded route, else empty.
+  List<RoutePoint> _displayRoute() {
+    if (_recorder.isRecording && _recorder.currentRoute.isNotEmpty) {
+      return _recorder.currentRoute;
+    }
+    if (_recorder.pending.isNotEmpty) return _recorder.pending.last.route;
+    return const [];
+  }
+
+  Widget _buildMap(ThemeData theme) {
+    final route = _displayRoute();
+    final points = [for (final p in route) LatLng(p.latitude, p.longitude)];
+    final center =
+        points.isNotEmpty ? points.last : const LatLng(40.0150, -105.2705);
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(initialCenter: center, initialZoom: 15),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.xctraining.xc_training_app',
+            ),
+            if (points.length >= 2)
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: points,
+                    strokeWidth: 4,
+                    color: theme.colorScheme.primary,
+                  ),
+                ],
+              ),
+            MarkerLayer(
+              markers: [
+                if (points.isNotEmpty)
+                  Marker(
+                    point: points.first,
+                    width: 24,
+                    height: 24,
+                    child: const Icon(Icons.trip_origin,
+                        color: Colors.green, size: 22),
+                  ),
+                if (points.isNotEmpty)
+                  Marker(
+                    point: points.last,
+                    width: 28,
+                    height: 28,
+                    child: Icon(
+                      _recorder.isRecording ? Icons.my_location : Icons.flag,
+                      color: theme.colorScheme.error,
+                      size: 26,
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
-      ),
+        // OpenStreetMap attribution.
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: Container(
+            color: Colors.white70,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text('© OpenStreetMap',
+                style: theme.textTheme.labelSmall),
+          ),
+        ),
+        if (points.isEmpty)
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'No route yet — tap Start Workout',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

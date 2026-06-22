@@ -12,8 +12,9 @@ HealthKit (iOS) support is planned.
 - Requests Health Connect read access for heart rate, HRV, resting HR,
   respiratory rate, steps, distance, active calories, sleep, and workouts.
 - Shows the most recent heart rate as a single number.
-- **Record a workout's GPS route** — Start/Stop buttons track location while
-  active; the route uploads alongside the health data.
+- **Record a workout's GPS route** — a dedicated **Workout** tab tracks location
+  while active and draws the route live on a map (OpenStreetMap, no API key); the
+  route uploads alongside the health data.
 - Optional **Sign in with Google** — uploads are then authenticated as that
   Google account and carry the Google profile.
 - Uploads a 30-day window of all of the above to the server as a single gzipped
@@ -47,7 +48,10 @@ The payload format (the contract with the backend) is documented in
 - Flutter 3.44 / Dart 3.12
 - [`health`](https://pub.dev/packages/health) `^13.3.1` — Health Connect / HealthKit
 - [`http`](https://pub.dev/packages/http) — server upload
-- [`shared_preferences`](https://pub.dev/packages/shared_preferences) — token storage
+- [`shared_preferences`](https://pub.dev/packages/shared_preferences) — token + pending routes
+- [`geolocator`](https://pub.dev/packages/geolocator) — workout GPS tracking
+- [`flutter_map`](https://pub.dev/packages/flutter_map) + [`latlong2`](https://pub.dev/packages/latlong2) — route map (OpenStreetMap)
+- [`google_sign_in`](https://pub.dev/packages/google_sign_in) — optional Google auth
 - Android `minSdk` 26 (Health Connect requirement)
 
 ## Getting started
@@ -108,8 +112,10 @@ and the app uploads anonymously — nothing breaks.
 
 ```
 lib/
-  main.dart                  UI: permission flow, heart-rate display, upload button
+  main.dart                  Two-tab UI (Health / Workout): permissions, upload, map
   health_sync_uploader.dart  Reads Health Connect data, builds + uploads the payload
+  workout_recorder.dart      GPS route recording (Start/Stop), persisted until upload
+  google_auth.dart           Google sign-in wrapper (google_sign_in v7)
 tool/
   analyze_health_data.dart   Introspects a health_sync payload into an empirical schema
 docs/
