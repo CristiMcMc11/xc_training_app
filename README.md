@@ -12,6 +12,8 @@ HealthKit (iOS) support is planned.
 - Requests Health Connect read access for heart rate, HRV, resting HR,
   respiratory rate, steps, distance, active calories, sleep, and workouts.
 - Shows the most recent heart rate as a single number.
+- Optional **Sign in with Google** — uploads are then authenticated as that
+  Google account and carry the Google profile.
 - Uploads a 30-day window of all of the above to the server as a single gzipped
   `health_sync` payload, then reports the server's batch id and per-metric counts.
 - Handles the awkward parts of platform-integrated Health Connect (Android 14+):
@@ -78,6 +80,27 @@ flutter run --dart-define=HEALTH_SYNC_URL=http://10.0.2.2:3000/v1
 > If you test from a **physical phone** against a server on your PC, make sure the
 > server's port is allowed through the host firewall and the phone is on the same
 > network.
+
+### Enable Google Sign-In (optional)
+
+Google sign-in is off until you supply an OAuth **Web client ID** at build time:
+
+```sh
+flutter run \
+  --dart-define=HEALTH_SYNC_URL=http://10.0.2.2:3000/v1 \
+  --dart-define=GOOGLE_SERVER_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+```
+
+In a Google Cloud project (the same one the server verifies tokens against),
+create:
+
+1. A **Web** OAuth 2.0 client — its ID is the `GOOGLE_SERVER_CLIENT_ID` above.
+2. An **Android** OAuth 2.0 client — package `com.xctraining.xc_training_app`
+   plus your signing certificate's SHA-1 (the debug keystore SHA-1 is in
+   [CLAUDE.md](CLAUDE.md)).
+
+Without `GOOGLE_SERVER_CLIENT_ID`, the sign-in button reports "not configured"
+and the app uploads anonymously — nothing breaks.
 
 ## Project structure
 

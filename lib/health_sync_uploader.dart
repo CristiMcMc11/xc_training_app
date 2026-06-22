@@ -8,6 +8,8 @@ import 'package:health/health.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'google_auth.dart';
+
 /// Outcome of a successful upload: the server's batch id and per-metric counts.
 class HealthSyncResult {
   HealthSyncResult(this.batchId, this.counts, this.recordCount);
@@ -54,9 +56,13 @@ class HealthSyncUploader {
   static const _athleteIdKey = 'health_sync_athlete_id';
 
   /// Reads health data and uploads it. [onProgress] reports human-readable
-  /// status for the UI.
+  /// status for the UI. When [googleUser] is provided, the upload is
+  /// authenticated as that Google account (via `POST /v1/auth/google`) and the
+  /// Google profile is embedded in the payload; otherwise an anonymous
+  /// device account is used.
   Future<HealthSyncResult> upload({
     required void Function(String) onProgress,
+    GoogleUser? googleUser,
   }) async {
     onProgress('Reading health data…');
     final now = DateTime.now();
@@ -111,6 +117,7 @@ class HealthSyncUploader {
       sleepRem: sleepRem,
       sleepLight: sleepLight,
       sleepAwake: sleepAwake,
+      googleUser: googleUser,
     );
     final recordCount = heartRate.length +
         steps.length +
@@ -126,9 +133,12 @@ class HealthSyncUploader {
         sleepLight.length +
         sleepAwake.length;
 
-    onProgress('Authenticating…');
-    var auth = await _loadAuth();
-    auth ??= await _register();
+    onProgress(googleUser == null
+        ? 'Authenticating…'
+        : 'Authenticating as ${googleUser.email}…');
+    var auth = googleUser != null
+        ? await _authenticateGoogle(googleUser.idToken)
+        : await _loadAuth() ?? await _register();
 
     // Server validates athlete_id against the token principal.
     payload['athlete_id'] = auth.athleteId;
@@ -139,10 +149,12 @@ class HealthSyncUploader {
     onProgress('Uploading ${_mb(gzipped.length)}…');
     var response = await _post(gzipped, auth.token);
 
-    // Token expired / invalid → re-register once and retry.
+    // Token expired / invalid → re-auth once and retry (Google or anonymous).
     if (response.statusCode == 401) {
       onProgress('Re-authenticating…');
-      auth = await _register();
+      auth = googleUser != null
+          ? await _authenticateGoogle(googleUser.idToken)
+          : await _register();
       payload['athlete_id'] = auth.athleteId;
       final retry = await compute(_encodeGzip, payload);
       response = await _post(retry, auth.token);
@@ -229,6 +241,7 @@ class HealthSyncUploader {
     required List<HealthDataPoint> sleepRem,
     required List<HealthDataPoint> sleepLight,
     required List<HealthDataPoint> sleepAwake,
+    GoogleUser? googleUser,
   }) {
     String iso(DateTime t) => t.toUtc().toIso8601String();
     num value(HealthDataPoint p) => (p.value as NumericHealthValue).numericValue;
@@ -281,6 +294,12 @@ class HealthSyncUploader {
       'uploaded_at': iso(DateTime.now()),
       'window_start': iso(windowStart),
       'window_end': iso(windowEnd),
+      if (googleUser != null)
+        'google_user': {
+          'id': googleUser.id,
+          'email': googleUser.email,
+          'name': googleUser.name,
+        },
       'heart_rate_samples': points(heartRate, asInt: true),
       'hrv_rmssd_samples': points(hrv, asInt: false),
       'resting_heart_rate_samples': points(restingHr, asInt: true),
@@ -338,6 +357,31 @@ class HealthSyncUploader {
     }
     final body = json.decode(response.body) as Map<String, dynamic>;
     final auth = _Auth(body['token'] as String, body['athlete_id'] as int);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_tokenKey, auth.token);
+    await prefs.setInt(_athleteIdKey, auth.athleteId);
+    return auth;
+  }
+
+  /// Exchanges a Google ID token for a server session (the server verifies the
+  /// token with Google and maps it to the athlete). Persists the returned token.
+  Future<_Auth> _authenticateGoogle(String idToken) async {
+    final response = await http.post(
+      Uri.parse('$_baseUrl/auth/google'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'id_token': idToken}),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HealthSyncException(
+        'Google sign-in rejected by server (${response.statusCode}): '
+        '${response.body}',
+      );
+    }
+    final body = json.decode(response.body) as Map<String, dynamic>;
+    final token = (body['token'] ?? body['access_token']) as String;
+    final athleteId = body['athlete_id'] as int;
+    final auth = _Auth(token, athleteId);
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, auth.token);

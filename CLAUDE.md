@@ -30,9 +30,14 @@ Single-screen app (`lib/main.dart`) that:
 - Base URL via `--dart-define=HEALTH_SYNC_URL=...` (default targets the LAN dev
   server `http://192.168.86.182:3000/v1`; the Android emulator reaches a host
   server via `10.0.2.2`).
-- Auth: `POST /v1/auth/register` `{username,email,password}` → `{athlete_id, token}`.
-  Token persisted in shared_preferences; re-registers on 401. (No login endpoint
-  yet, so a lost/expired token means a new account.)
+- Auth, two paths:
+  - **Google** (`lib/google_auth.dart`): sign in → Google ID token →
+    `POST /v1/auth/google` `{id_token}` → `{athlete_id, token}`. When signed in,
+    the upload runs as that athlete and embeds `google_user {id,email,name}` in
+    the payload.
+  - **Anonymous fallback**: `POST /v1/auth/register` `{username,email,password}`
+    → `{athlete_id, token}`. Used when not signed in with Google.
+  - Token persisted in shared_preferences; re-authenticates on 401.
 - Sync: `POST /v1/health-sync` with `Authorization: Bearer <token>`,
   `Content-Encoding: gzip` → `{batch_id, counts:{...}}`. Server validates
   `athlete_id` against the token principal.
@@ -60,6 +65,26 @@ Two permission-rationale declarations are required:
 `MainActivity` extends `FlutterFragmentActivity` (not `FlutterActivity`) so the
 health plugin's permission launcher registers. The `<queries>` block includes the
 Health Connect package so the app can detect and launch it.
+
+## Google Sign-In setup (`google_sign_in` v7)
+
+Sign-in needs OAuth credentials in a Google Cloud project (cannot be done from
+code). The app reads the **Web OAuth client ID** at build time:
+
+```sh
+flutter run --dart-define=GOOGLE_SERVER_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+```
+
+Required in Google Cloud (same project the server verifies against):
+1. **Web** OAuth 2.0 client → its ID is `GOOGLE_SERVER_CLIENT_ID` (the token
+   audience the server checks at `POST /v1/auth/google`).
+2. **Android** OAuth 2.0 client → package `com.xctraining.xc_training_app` +
+   signing SHA-1. Debug keystore SHA-1:
+   `D3:4B:A7:DD:05:51:00:5C:FC:61:27:29:D7:B4:BC:8D:38:5F:DC:52`.
+
+Without `GOOGLE_SERVER_CLIENT_ID`, the sign-in button shows a "not configured"
+message and the app falls back to anonymous upload — no crash. No manifest or
+`google-services.json` changes are needed for v7 when using `serverClientId`.
 
 ## health package API notes (v13)
 

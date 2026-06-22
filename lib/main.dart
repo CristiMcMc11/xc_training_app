@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:health/health.dart';
 
+import 'google_auth.dart';
 import 'health_sync_uploader.dart';
 
 void main() {
@@ -35,6 +36,7 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     with WidgetsBindingObserver {
   final _health = Health();
   late final _uploader = HealthSyncUploader(_health);
+  final _googleAuth = GoogleAuthService();
 
   // Every metric the app reads/uploads. All READ-only, so requestAuthorization
   // defaults (no explicit permissions list needed).
@@ -65,6 +67,9 @@ class _HeartRateScreenState extends State<HeartRateScreen>
 
   bool _uploading = false;
   String? _uploadStatus;
+
+  GoogleUser? _googleUser;
+  bool _signingIn = false;
 
   @override
   void initState() {
@@ -196,6 +201,23 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     }
   }
 
+  Future<void> _signIn() async {
+    setState(() => _signingIn = true);
+    try {
+      final user = await _googleAuth.signIn();
+      if (mounted) setState(() => _googleUser = user);
+    } catch (e) {
+      if (mounted) setState(() => _uploadStatus = 'Sign-in failed: $e');
+    } finally {
+      if (mounted) setState(() => _signingIn = false);
+    }
+  }
+
+  Future<void> _signOut() async {
+    await _googleAuth.signOut();
+    if (mounted) setState(() => _googleUser = null);
+  }
+
   Future<void> _upload() async {
     setState(() {
       _uploading = true;
@@ -203,6 +225,7 @@ class _HeartRateScreenState extends State<HeartRateScreen>
     });
     try {
       final result = await _uploader.upload(
+        googleUser: _googleUser,
         onProgress: (msg) {
           if (mounted) setState(() => _uploadStatus = msg);
         },
@@ -228,6 +251,32 @@ class _HeartRateScreenState extends State<HeartRateScreen>
         });
       }
     }
+  }
+
+  Widget _buildGoogleAuth(ThemeData theme) {
+    if (_googleUser != null) {
+      return Column(
+        children: [
+          Text('Signed in as ${_googleUser!.email}',
+              style: theme.textTheme.bodySmall),
+          TextButton(
+            onPressed: _signOut,
+            child: const Text('Sign out'),
+          ),
+        ],
+      );
+    }
+    return OutlinedButton.icon(
+      onPressed: _signingIn ? null : _signIn,
+      icon: _signingIn
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.account_circle),
+      label: const Text('Sign in with Google'),
+    );
   }
 
   @override
@@ -268,6 +317,8 @@ class _HeartRateScreenState extends State<HeartRateScreen>
               label: Text(_heartRate == null ? 'Grant Permissions & Fetch' : 'Refresh'),
             ),
             const SizedBox(height: 16),
+            _buildGoogleAuth(theme),
+            const SizedBox(height: 16),
             FilledButton.tonalIcon(
               onPressed: (_loading || _uploading) ? null : _upload,
               icon: _uploading
@@ -277,7 +328,9 @@ class _HeartRateScreenState extends State<HeartRateScreen>
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.cloud_upload),
-              label: const Text('Upload to Server'),
+              label: Text(_googleUser == null
+                  ? 'Upload to Server'
+                  : 'Upload as ${_googleUser!.email}'),
             ),
             if (_uploadStatus != null) ...[
               const SizedBox(height: 16),
